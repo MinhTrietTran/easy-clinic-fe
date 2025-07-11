@@ -1,44 +1,82 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, Typography, TextField, Button, Box, Avatar, Grid, Alert, Link } from '@mui/material';
-
-const USERS = [
-    { email: 'admin@abc.com', password: 'admin123', role: 'admin' },
-    { email: 'doctor@abc.com', password: 'doctor123', role: 'doctor' },
-];
+import { Card, CardContent, Typography, TextField, Button, Box, Avatar, Grid, Alert, Link, Snackbar } from '@mui/material';
+import { API_BASE_URL, setTokens, clearTokens } from '../utils/auth';
 
 export default function LoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
     const navigate = useNavigate();
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        // Check admin/doctor
-        const user = USERS.find(u => u.email === email && u.password === password);
-        if (user) {
-            localStorage.setItem('role', user.role);
-            if (user.role === 'admin') {
-                navigate('/admin');
-                window.location.reload();
-            } else if (user.role === 'doctor') {
-                navigate('/doctor');
-                window.location.reload();
+        setLoading(true);
+        setError('');
+        setSuccessMessage('');
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/users/login/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ email, password }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                setTokens(data.access, data.refresh);
+
+                const meResponse = await fetch(`${API_BASE_URL}/users/me/`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${data.access}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                const meData = await meResponse.json();
+
+                if (meResponse.ok) {
+                    localStorage.setItem('user_info', JSON.stringify(meData));
+                    localStorage.setItem('role', meData.phone);
+                    setSuccessMessage('Đăng nhập thành công!');
+
+                    setTimeout(() => {
+                        if (meData.phone === 'admin') {
+                            navigate('/admin');
+                        } else if (meData.phone === 'doctor') {
+                            navigate('/doctor');
+                        } else if (meData.phone === 'patient') {
+                            navigate('/patient');
+                        }
+                        window.location.reload();
+                    }, 1000);
+
+                } else {
+                    clearTokens();
+                    setError(meData.detail || 'Failed to fetch user details.');
+                }
+
+            } else {
+                setError(data.error || 'Sai email hoặc mật khẩu!');
             }
+        } catch (err) {
+            setError('Lỗi kết nối đến máy chủ.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleCloseSnackbar = (event, reason) => {
+        if (reason === 'clickaway') {
             return;
         }
-        // Check patient
-        const patients = JSON.parse(localStorage.getItem('patients') || '[]');
-        const patient = patients.find(p => p.email === email && p.password === password);
-        if (patient) {
-            localStorage.setItem('role', 'patient');
-            localStorage.setItem('patient_info', JSON.stringify(patient));
-            navigate('/patient');
-            window.location.reload();
-            return;
-        }
-        setError('Sai email hoặc mật khẩu!');
+        setSuccessMessage('');
     };
 
     return (
@@ -69,8 +107,8 @@ export default function LoginPage() {
                             required
                         />
                         {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
-                        <Button type="submit" variant="contained" color="primary" fullWidth sx={{ mt: 2, py: 1.2 }}>
-                            Đăng nhập
+                        <Button type="submit" variant="contained" color="primary" fullWidth sx={{ mt: 2, py: 1.2 }} disabled={loading}>
+                            {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
                         </Button>
                     </form>
                     <Box mt={2} textAlign="center">
@@ -80,12 +118,18 @@ export default function LoginPage() {
                         </Typography>
                     </Box>
                     <Box mt={3} fontSize={12} color="#888" textAlign="left">
-                        <Typography variant="subtitle2" fontWeight={700}>Tài khoản mẫu:</Typography>
-                        <Typography variant="body2">Admin: admin@abc.com / admin123</Typography>
-                        <Typography variant="body2">Bác sĩ: doctor@abc.com / doctor123</Typography>
+                        <Typography variant="subtitle2" fontWeight={700}>Tài khoản Admin và Bác sĩ:</Typography>
+                        <Typography variant="body2">Admin: admin@hospital.com / admin123</Typography>
+                        <Typography variant="body2">Bác sĩ: doctor@hospital.com / doctor123</Typography>
                     </Box>
                 </CardContent>
             </Card>
+
+            <Snackbar open={!!successMessage} autoHideDuration={3000} onClose={handleCloseSnackbar}>
+                <Alert onClose={handleCloseSnackbar} severity="success" sx={{ width: '100%' }}>
+                    {successMessage}
+                </Alert>
+            </Snackbar>
         </Box>
     );
 } 

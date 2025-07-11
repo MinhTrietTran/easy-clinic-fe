@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, Typography, Avatar, Grid, List, ListItem, ListItemIcon, ListItemText, Divider } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
@@ -7,18 +7,17 @@ import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 
-const MOCK_DOCTOR = {
-    email: 'doctor@abc.com',
-    first_name: 'Trần',
-    last_name: 'Thị B',
-    department: 'Tai mũi họng',
-    phone: '0901234567',
-    cost: '300.000đ/lượt',
-    is_active: true,
-};
-
 export default function DoctorProfile() {
-    const info = MOCK_DOCTOR;
+    const [info, setInfo] = useState({});
+
+    useEffect(() => {
+        const data = JSON.parse(localStorage.getItem('user_info') || '{}');
+        setInfo(data);
+    }, []);
+
+    const userRole = localStorage.getItem('role');
+    if (!info || !info.email || userRole !== 'doctor') return <Typography color="error">Không có dữ liệu bác sĩ hoặc vai trò không đúng.</Typography>;
+
     return (
         <Card sx={{ maxWidth: 420, mx: 'auto', boxShadow: 3 }}>
             <CardContent>
@@ -45,11 +44,11 @@ export default function DoctorProfile() {
                     </ListItem>
                     <ListItem>
                         <ListItemIcon><PhoneIcon color="action" /></ListItemIcon>
-                        <ListItemText primary={<><b>Số điện thoại:</b> {info.phone}</>} />
+                        <ListItemText primary={<><b>Số điện thoại:</b> {info.phone || 'N/A'}</>} />
                     </ListItem>
                     <ListItem>
                         <ListItemIcon><MonetizationOnIcon color="success" /></ListItemIcon>
-                        <ListItemText primary={<><b>Chi phí khám:</b> {info.cost}</>} />
+                        <ListItemText primary={<><b>Chi phí khám:</b> {info.cost ? `${info.cost.toLocaleString()}đ/lượt` : 'N/A'}</>} />
                     </ListItem>
                     <ListItem>
                         <ListItemIcon>{info.is_active ? <CheckCircleIcon color="success" /> : <CancelIcon color="error" />}</ListItemIcon>

@@ -1,20 +1,24 @@
-import React, { useState } from 'react';
-import { Card, CardContent, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Grid } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Grid, CircularProgress, Box, Alert } from '@mui/material';
 import HealthRecordForm from './HealthRecordForm';
+import { authenticatedFetch, API_BASE_URL as USER_API_BASE_URL } from '../../utils/auth';
+
+const APPOINTMENT_API_BASE_URL = 'http://localhost:5002/api/v1';
 
 // Giả lập tên bác sĩ đăng nhập từ localStorage hoặc biến
-const currentDoctor = localStorage.getItem('doctorName') || 'Nguyễn Văn A';
+// const currentDoctor = localStorage.getItem('doctorName') || 'Nguyễn Văn A'; // Will be removed/replaced
 
-const MOCK_SCHEDULE = [
-    { id: 1, date: '2024-05-10', time: '09:00', patient: 'Nguyễn Văn C', status: 'Đã xác nhận', department: 'Nội tổng quát', doctor: 'Nguyễn Văn A', allergies: 'Không', chronic: 'Tăng huyết áp' },
-    { id: 2, date: '2024-05-11', time: '14:00', patient: 'Lê Thị D', status: 'Chờ xác nhận', department: 'Tai mũi họng', doctor: 'Trần Thị B', allergies: 'Penicillin', chronic: 'Tiểu đường' },
-];
+// MOCK_SCHEDULE will be replaced by API data
+// const MOCK_SCHEDULE = [
+//     { id: 1, date: '2024-05-10', time: '09:00', patient: 'Nguyễn Văn C', status: 'Đã xác nhận', department: 'Nội tổng quát', doctor: 'Nguyễn Văn A', allergies: 'Không', chronic: 'Tăng huyết áp' },
+//     { id: 2, date: '2024-05-11', time: '14:00', patient: 'Lê Thị D', status: 'Chờ xác nhận', department: 'Tai mũi họng', doctor: 'Trần Thị B', allergies: 'Penicillin', chronic: 'Tiểu đường' },
+// ];
 
-function AddHealthRecordDialog({ open, onClose, patient, date }) {
+function AddHealthRecordDialog({ open, onClose, patientInfo, appointmentDate }) {
     // Tích hợp form bệnh án và đơn thuốc
     const [form, setForm] = useState({
-        patient: patient || '',
-        visit_date: date || '',
+        patient: patientInfo?.full_name || '',
+        visit_date: appointmentDate || '',
         diagnosis: '',
         treatment: '',
         notes: '',
@@ -102,18 +106,109 @@ function AddHealthRecordDialog({ open, onClose, patient, date }) {
 
 export default function DoctorSchedule() {
     const [selected, setSelected] = useState(null);
-    const [addRecord, setAddRecord] = useState({ open: false, scheduleId: null });
+    const [addRecord, setAddRecord] = useState({ open: false, scheduleId: null, patientInfo: null, appointmentDate: null });
     const [addedRecords, setAddedRecords] = useState([]); // lưu id đã thêm bệnh án
-    const mySchedule = MOCK_SCHEDULE.filter(s => s.doctor === currentDoctor);
-    const handleAddRecord = (row) => setAddRecord({ open: true, scheduleId: row.id, patient: row.patient, date: row.date });
+    const [doctorInfo, setDoctorInfo] = useState(null);
+    const [schedule, setSchedule] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        const fetchDoctorDataAndSchedule = async () => {
+            try {
+                // 1. Fetch doctor_id from /users/me/
+                const meResponse = await authenticatedFetch(`${USER_API_BASE_URL}/users/me/`);
+                if (!meResponse.ok) {
+                    throw new Error('Failed to fetch user data.');
+                }
+                const meData = await meResponse.json();
+
+                if (meData.phone !== 'doctor' && meData.role !== 'doctor') { // check both phone (from login page) and actual role
+                    setError('Bạn không phải là bác sĩ để xem lịch này.');
+                    setLoading(false);
+                    return;
+                }
+                setDoctorInfo(meData);
+
+                const doctorId = meData.id; // Get the doctor's actual ID
+
+                // 2. Fetch doctor's schedule using doctor_id
+                const scheduleResponse = await authenticatedFetch(`${APPOINTMENT_API_BASE_URL}/doctors/${doctorId}/schedule/`);
+                if (!scheduleResponse.ok) {
+                    throw new Error('Failed to fetch doctor schedule.');
+                }
+                const scheduleData = await scheduleResponse.json();
+
+                // Flatten the schedule object into an array for easy mapping
+                const flattenedSchedule = Object.keys(scheduleData.schedule).flatMap(dateKey =>
+                    scheduleData.schedule[dateKey].map(appt => ({
+                        ...appt,
+                        date: dateKey, // Add date to each appointment object
+                        time: new Date(appt.time_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        patient_name: appt.patient_info ? `${appt.patient_info.first_name} ${appt.patient_info.last_name}`.trim() : 'N/A',
+                        status_display: appt.status_display || appt.status,
+                        department_requested: appt.department_requested || 'N/A', // Add department if available
+                    }))
+                );
+
+                setSchedule(flattenedSchedule);
+
+            } catch (err) {
+                console.error('Error fetching doctor schedule:', err);
+                setError(err.message || 'Không thể tải lịch khám của bác sĩ.');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchDoctorDataAndSchedule();
+    }, []); // Empty dependency array means this runs once on mount
+
+    const handleAddRecord = (row) => {
+        setAddRecord({
+            open: true,
+            scheduleId: row.appointment_id,
+            patientInfo: row.patient_info, // Pass full patient info
+            appointmentDate: row.date
+        });
+    };
     const handleAddRecordClose = (saved) => {
         if (saved && addRecord.scheduleId) setAddedRecords([...addedRecords, addRecord.scheduleId]);
-        setAddRecord({ open: false, scheduleId: null });
+        setAddRecord({ open: false, scheduleId: null, patientInfo: null, appointmentDate: null });
     };
+
+    if (loading) {
+        return (
+            <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+                <CircularProgress />
+                <Typography ml={2}>Đang tải lịch khám...</Typography>
+            </Box>
+        );
+    }
+
+    if (error) {
+        return (
+            <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+                <Alert severity="error">{error}</Alert>
+            </Box>
+        );
+    }
+
+    if (!schedule || schedule.length === 0) {
+        return (
+            <Card>
+                <CardContent>
+                    <Typography variant="h6" mb={2}>Lịch khám</Typography>
+                    <Typography>Không có lịch khám nào trong khoảng thời gian này.</Typography>
+                </CardContent>
+            </Card>
+        );
+    }
+
     return (
         <Card>
             <CardContent>
-                <Typography variant="h6" mb={2}>Lịch khám</Typography>
+                <Typography variant="h6" mb={2}>Lịch khám của {doctorInfo?.first_name} {doctorInfo?.last_name}</Typography>
                 <TableContainer component={Paper}>
                     <Table size="small">
                         <TableHead>
@@ -126,15 +221,15 @@ export default function DoctorSchedule() {
                             </TableRow>
                         </TableHead>
                         <TableBody>
-                            {mySchedule.map(s => (
-                                <TableRow key={s.id}>
+                            {schedule.map(s => (
+                                <TableRow key={s.appointment_id}>
                                     <TableCell>{s.date}</TableCell>
                                     <TableCell>{s.time}</TableCell>
-                                    <TableCell>{s.patient}</TableCell>
-                                    <TableCell>{s.status}</TableCell>
+                                    <TableCell>{s.patient_name}</TableCell>
+                                    <TableCell>{s.status_display}</TableCell>
                                     <TableCell>
                                         <Button variant="outlined" size="small" onClick={() => setSelected(s)}>Xem chi tiết</Button>
-                                        {s.status === 'Đã xác nhận' && !addedRecords.includes(s.id) && (
+                                        {s.status === 'confirmed' && !addedRecords.includes(s.appointment_id) && (
                                             <Button variant="contained" size="small" sx={{ ml: 1 }} onClick={() => handleAddRecord(s)}>Thêm bệnh án</Button>
                                         )}
                                     </TableCell>
@@ -150,11 +245,10 @@ export default function DoctorSchedule() {
                             <>
                                 <Typography><b>Ngày:</b> {selected.date}</Typography>
                                 <Typography><b>Giờ:</b> {selected.time}</Typography>
-                                <Typography><b>Bệnh nhân:</b> {selected.patient}</Typography>
-                                <Typography><b>Chuyên khoa:</b> {selected.department}</Typography>
-                                <Typography><b>Trạng thái:</b> {selected.status}</Typography>
-                                <Typography><b>Dị ứng:</b> {selected.allergies}</Typography>
-                                <Typography><b>Bệnh mãn tính:</b> {selected.chronic}</Typography>
+                                <Typography><b>Bệnh nhân:</b> {selected.patient_name}</Typography>
+                                <Typography><b>Trạng thái:</b> {selected.status_display}</Typography>
+                                <Typography><b>Dị ứng:</b> {selected.patient_info?.allergies || 'Không có'}</Typography>
+                                <Typography><b>Bệnh mãn tính:</b> {selected.patient_info?.chronic_diseases || 'Không có'}</Typography>
                             </>
                         )}
                     </DialogContent>
@@ -165,8 +259,8 @@ export default function DoctorSchedule() {
                 <AddHealthRecordDialog
                     open={addRecord.open}
                     onClose={handleAddRecordClose}
-                    patient={addRecord.patient}
-                    date={addRecord.date}
+                    patientInfo={addRecord.patientInfo}
+                    appointmentDate={addRecord.appointmentDate}
                 />
             </CardContent>
         </Card>
